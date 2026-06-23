@@ -35,10 +35,31 @@ class Fireball(Monster):
 
 class Skeleton(Monster):
     name: str = "skeleton"
+    dying: bool = False
+    death_timer: int = 0
 
 class Snake(Monster):
     name: str = "snake"
     dying: bool = False     
     death_timer: int = 0
 
+class Giant(Monster):
+    name: str = "giant"
+
+class Projectile(BaseModel):
+    x: int
+    y: int
+    direction: str
+    projectile_type: str
+    move: Move | None = None
+
+class Dragon(Monster):
+    name: str = "dragon"
+    health: int = 100
+    max_health: int = 100
+    attack_timer: int = 100
+    move_timer: int = 80
+
+class Bullet(Monster):
+    name: str = "bullet"
            

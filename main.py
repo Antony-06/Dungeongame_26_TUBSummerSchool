@@ -5,9 +5,26 @@ import os
 import numpy as np
 import cv2
 from game import start_game, move_player, update, update_effects
-from moves import Fireball, Skeleton, Snake
+from moves import Fireball, Skeleton, Snake, Giant, Projectile, Dragon  
+from pygame import mixer
+from cutscene import show_cutscene
 
 TILE_PATH = os.path.split(__file__)[0] + '/tiles'
+
+import cv2
+
+files = [
+    "gun.png",
+    "laser.png",
+    "bullet.png",
+    "laser_bullet.png"]
+
+for f in files:
+    img = cv2.imread("tiles/" + f)
+    img = cv2.resize(
+        img,(32, 32))
+    cv2.imwrite(
+        "tiles/" + f,img)
 
 # title of the game window
 GAME_TITLE = "Dungeon Explorer"
@@ -26,7 +43,6 @@ MOVES = {
 SCREEN_SIZE_X, SCREEN_SIZE_Y = 1160, 960
 TILE_SIZE = 64
 
-
 def read_image(filename: str) -> np.ndarray:
     """
     Reads an image from the given filename and doubles its size.
@@ -37,7 +53,6 @@ def read_image(filename: str) -> np.ndarray:
         raise IOError(f"Image not found: '{filename}'")
     img = np.kron(img, np.ones((2, 2, 1), dtype=img.dtype))  # double image size
     return img
-
 
 def read_images():
     return {
@@ -88,7 +103,8 @@ def draw(game, images, moves):
     "D":"closed_door",
     "d":"open_door",
     "P":"potion",
-    "S":"short_sword"
+    "S":"short_sword",
+    "&":"shop"
     }
 
     for y, row in enumerate(game.current_level.level):
@@ -109,11 +125,27 @@ def draw(game, images, moves):
             img = images["skeleton"]
         elif isinstance(m, Snake):
             img = images["snake"]
+        elif isinstance(m, Giant):
+            img = images["giant"]
+        elif isinstance(m, Dragon):
+            img = images["dragon"]
         else:
             continue
         if not m.move or m.move.complete:
-            draw_tile(frame, x=m.x, y=m.y, image=img)
-        if isinstance(m, Snake) and m.dying and m.death_timer > 0:
+            if isinstance(m, Dragon):
+                dragon_img = cv2.resize(images["dragon"],(128, 128))
+
+                x0 = m.x * TILE_SIZE
+                y0 = m.y * TILE_SIZE
+
+                frame[y0:y0+128,x0:x0+128] = dragon_img
+            
+            elif isinstance(m, Snake):
+                if not m.dying:
+                    draw_tile(frame, x=m.x, y=m.y, image=img)
+            else:
+                draw_tile(frame, x=m.x, y=m.y, image=img)
+        if isinstance(m, (Snake, Skeleton)) and m.dying and m.death_timer > 0:
             x0 = m.x * TILE_SIZE
             y0 = m.y * TILE_SIZE
             if (m.death_timer % 2) == 0:
@@ -126,6 +158,29 @@ def draw(game, images, moves):
        
 
     # draw player
+    for m in game.current_level.monsters:
+        if isinstance(m, Dragon):
+            cv2.putText(
+                frame,
+                "ANCIENT DRAGON",
+                (250, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255,255,255),2)
+            frame[40:70, 250:850] = (50,50,50)
+            bar_width = max(0,int(600 * m.health / m.max_health))
+            frame[
+                40:70,
+                250:250+bar_width] = (0,0,255)
+
+            cv2.putText(
+            frame,
+            f"{m.health}/{m.max_health}",
+            (500,95),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255,255,255),2)
+
     while game.moves:
         moves.append(game.moves.pop())
     if not is_player_moving(moves):
@@ -149,7 +204,17 @@ def draw(game, images, moves):
                 thickness=3,
                 )
 
-    
+    for p in game.projectiles:
+        if (0 <= p.y < len(game.current_level.level)and 0<= p.x < len(game.current_level.level[0])):
+            if "laser" in game.items:
+                img = images["laser_bullet"]
+            else:
+                img = images["bullet"]
+            draw_tile(
+            frame,
+            x=p.x,
+            y=p.y,
+            image=img)
     heart_img = images["heart"]        
     heart_small = cv2.resize(heart_img, (32, 32))
     start_x, start_y = 980, 150         
@@ -186,30 +251,80 @@ def draw(game, images, moves):
     # display complete image
     cv2.imshow(GAME_TITLE, frame)
 
+    #return frame
+
 def handle_keyboard(game):
     """keys are mapped to move commands"""
     key = chr(cv2.waitKey(1) & 0xFF)
     if key == "q":
         game.status = "exited"
+    elif key == "j":
+
+        if "gun" in game.items or "laser" in game.items:
+
+            projectile_type = "bullet"
+
+            if "laser" in game.items:
+                projectile_type = "laser_bullet"
+
+            game.projectiles.append(
+                Projectile(
+                    x=game.x,
+                    y=game.y,
+                    direction=game.facing,
+                    projectile_type=projectile_type))
+
     return MOVES.get(key)
 
+def show_victory_screen():
+
+    img = cv2.imread("tiles/Victory.png")
+    cv2.putText(
+        img,
+        "Press any key to continue...",
+        (330, 760),     
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (255,255,255),
+        2)
+    cv2.imshow("Victory", img)
+
+    cv2.waitKey(0)
 
 def main():
     images = read_images()
+    if "shop" in images:
+        images["shop"] = cv2.resize(images["shop"], (TILE_SIZE, TILE_SIZE))
+    show_cutscene()
+    mixer.init()
+    mixer.music.load("gamemusic_v1.mp3")
+    mixer.music.play(loops=-1)
     game = start_game()
     queued_move = None
     moves = []
+    #fourcc = cv2.VideoWriter_fourcc(*"MP4V")
+    #out = cv2.VideoWriter("myvideo.mp4", fourcc,
+                      #60.0,   # frames per second
+                      #(SCREEN_SIZE_X,SCREEN_SIZE_Y))
+
     while game.status == "running":
         draw(game, images, moves)
+        #frame = draw(game, images, moves)
+        #out.write(frame)
         moves = clean_moves(game, moves)
         update(game)
         update_effects(game)
         queued_move = handle_keyboard(game)
+        # load and safe the game
         if not is_player_moving(moves) and queued_move:
             move_player(game, queued_move)
+    #out.release()
+    mixer.music.stop()
 
-
+    if game.status == "victory":
+        show_victory_screen()
     cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     main()
